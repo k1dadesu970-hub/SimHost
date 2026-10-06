@@ -11,7 +11,7 @@ from collections import Counter
 from datetime import datetime, timezone
 
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")
-HOST = os.getenv("SERVER_HOST", "direct.simhost2026.ru:7707")
+HOST = os.getenv("SERVER_HOST", "direct.simhost2026.ru")
 PORT = int(os.getenv("QUERY_PORT", "7708"))  # у Killing Floor query-порт обычно игровой + 1
 TITLE = os.getenv("SERVER_TITLE", "Simhost")
 BOT_NAME = os.getenv("BOT_NAME", "SimHost")
