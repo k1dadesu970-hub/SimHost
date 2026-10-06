@@ -16,9 +16,9 @@ jobs:
   check:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: "3.12"
 
@@ -28,7 +28,7 @@ jobs:
         run: python check.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          SERVER_HOST: ${{ vars.SERVER_HOST || 'direct.simhost2026.ru:7707' }}
+          SERVER_HOST: ${{ vars.SERVER_HOST || 'direct.simhost2026.ru' }}
           QUERY_PORT: ${{ vars.QUERY_PORT || '7708' }}
 
       - name: Save state
