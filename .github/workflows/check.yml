@@ -1,0 +1,39 @@
+name: SimHost check
+
+on:
+  schedule:
+    - cron: "*/5 * * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: simhost
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install python-a2s
+
+      - name: Check server
+        run: python check.py
+        env:
+          DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
+          SERVER_HOST: ${{ vars.SERVER_HOST || 'direct.simhost2026.ru' }}
+          QUERY_PORT: ${{ vars.QUERY_PORT || '7708' }}
+
+      - name: Save state
+        run: |
+          git config user.name "simhost-bot"
+          git config user.email "simhost-bot@users.noreply.github.com"
+          git add state.json || true
+          git diff --cached --quiet || (git commit -m "update state" && git push)
