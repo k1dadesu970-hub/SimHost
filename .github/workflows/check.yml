@@ -28,7 +28,7 @@ jobs:
         run: python check.py
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
-          SERVER_HOST: ${{ vars.SERVER_HOST || 'https://www.gametracker.com/server_info/direct.simhost2026.ru:7707/' }}
+          SERVER_HOST: ${{ vars.SERVER_HOST || 'direct.simhost2026.ru:7707' }}
           QUERY_PORT: ${{ vars.QUERY_PORT || '7708' }}
 
       - name: Save state
