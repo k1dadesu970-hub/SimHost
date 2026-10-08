@@ -29,7 +29,7 @@ jobs:
         env:
           DISCORD_WEBHOOK_URL: ${{ secrets.DISCORD_WEBHOOK_URL }}
           SERVER_HOST: ${{ vars.SERVER_HOST || 'direct.simhost2026.ru' }}
-          QUERY_PORT: ${{ vars.QUERY_PORT || '7708' }}
+          QUERY_PORT: ${{ vars.QUERY_PORT || '28852' }}
 
       - name: Save state
         run: |
