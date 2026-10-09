@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")
 HOST = os.getenv("SERVER_HOST", "direct.simhost2026.ru")
-PORT = int(os.getenv("QUERY_PORT", "28902"))  # у Killing Floor query-порт обычно игровой + 1
+PORT = int(os.getenv("QUERY_PORT", "3128"))  # у Killing Floor query-порт обычно игровой + 1
 TITLE = os.getenv("SERVER_TITLE", "Simhost")
 BOT_NAME = os.getenv("BOT_NAME", "SimHost")
 STATE_FILE = os.getenv("STATE_FILE", "state.json")
