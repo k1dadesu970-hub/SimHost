@@ -2,9 +2,15 @@
 
 Запускается по расписанию в GitHub Actions. Состояние (кто был онлайн
 в прошлый раз) хранится в state.json в репозитории.
+
+Опрос сервера: Killing Floor отвечает по собственному протоколу Unreal
+(порт «игровой + 1», у вас 7708), а не по Steam A2S. Скрипт пробует оба.
 """
 import json
 import os
+import re
+import socket
+import struct
 import sys
 import urllib.request
 from collections import Counter
@@ -12,21 +18,149 @@ from datetime import datetime, timezone
 
 WEBHOOK = os.environ.get("DISCORD_WEBHOOK_URL", "")
 HOST = os.getenv("SERVER_HOST", "direct.simhost2026.ru")
-PORT = int(os.getenv("QUERY_PORT", "3128"))  # у Killing Floor query-порт обычно игровой + 1
+# Порты через запятую. Для каждого пробуются оба протокола: Unreal и Steam A2S.
+PORTS = [int(p) for p in os.getenv("QUERY_PORT", "7708,28852,7707").replace(" ", "").split(",") if p]
 TITLE = os.getenv("SERVER_TITLE", "Simhost")
 BOT_NAME = os.getenv("BOT_NAME", "SimHost")
 STATE_FILE = os.getenv("STATE_FILE", "state.json")
 
+# ----------------------------------------------------------------------------
+# Протокол Unreal (Killing Floor / UT2004)
+# ----------------------------------------------------------------------------
 
-def fetch():
-    import a2s  # импорт здесь, чтобы скрипт можно было тестировать без библиотеки
+REQ_DETAILS = b"\x79\x00\x00\x00\x00"
+REQ_RULES = b"\x79\x00\x00\x00\x01"
+REQ_PLAYERS = b"\x79\x00\x00\x00\x02"
 
-    addr = (HOST, PORT)
-    info = a2s.info(addr, timeout=5)
-    players = a2s.players(addr, timeout=5)
+
+def _decode(raw):
+    try:
+        return raw.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw.decode("cp1251", "replace")
+
+
+class Reader:
+    def __init__(self, data):
+        self.b = data
+        self.i = 0
+
+    def left(self):
+        return len(self.b) - self.i
+
+    def int32(self):
+        v = struct.unpack_from("<i", self.b, self.i)[0]
+        self.i += 4
+        return v
+
+    def pstr(self):
+        n = self.b[self.i]
+        self.i += 1
+        if n & 0x80:  # юникод: (n - 0x80) символов UTF-16, включая завершающий
+            cnt = n & 0x7F
+            raw = self.b[self.i:self.i + cnt * 2]
+            self.i += cnt * 2
+            txt = raw.decode("utf-16-le", "replace")
+        else:
+            raw = self.b[self.i:self.i + n]
+            self.i += n
+            raw = re.sub(rb"\x1b[\x00-\xff]{3}", b"", raw)  # цветовые коды до декодирования
+            txt = _decode(raw)
+        txt = txt.replace("\x00", "")
+        return re.sub(r"\x1b[\s\S]{3}", "", txt).strip()  # цветовые коды ников
+
+
+def _recv_parts(sock, header, timeout):
+    """Собрать все датаграммы с нужным заголовком (ответ может прийти в нескольких)."""
+    sock.settimeout(timeout)
+    parts = []
+    while True:
+        try:
+            data, _ = sock.recvfrom(65535)
+        except socket.timeout:
+            break
+        if data[:5] == header:
+            parts.append(data[5:])
+            sock.settimeout(0.7)
+    if not parts:
+        raise TimeoutError("нет ответа (timed out)")
+    return b"".join(parts)
+
+
+def _ask(sock, addr, request, timeout=4):
+    sock.sendto(request, addr)
+    return _recv_parts(sock, b"\x80\x00\x00\x00" + request[4:5], timeout)
+
+
+def fetch_unreal(ip, port):
+    addr = (ip, port)
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        payload = _ask(sock, addr, REQ_DETAILS)
+        try:
+            r = Reader(payload)
+            r.int32()      # server id
+            r.pstr()       # server ip
+            r.int32()      # game port
+            r.int32()      # query port
+            r.pstr()       # server name
+            map_name = r.pstr()
+            game_type = r.pstr()
+        except (struct.error, IndexError):
+            raise ValueError("не удалось разобрать ответ details: " + payload[:80].hex())
+
+        names = []
+        try:
+            r = Reader(_ask(sock, addr, REQ_PLAYERS))
+            while r.left() >= 4:
+                r.int32()   # id игрока
+                name = r.pstr()
+                r.int32()   # ping
+                r.int32()   # score
+                r.int32()   # stats id
+                if name:
+                    names.append(name)
+        except (struct.error, IndexError):
+            pass  # обрезанный хвост: оставляем то, что успели разобрать
+        except TimeoutError:
+            pass
+
+        rules = {}
+        try:
+            r = Reader(_ask(sock, addr, REQ_RULES))
+            while r.left() > 0:
+                k = r.pstr().lower()
+                v = r.pstr()
+                if k:
+                    rules.setdefault(k, v)
+        except (struct.error, IndexError, TimeoutError):
+            pass
+
+        if rules:
+            print("правила сервера:", json.dumps(rules, ensure_ascii=False)[:600])
+        shown_type = None
+        for key in ("gametype", "game type", "gamemode", "game mode", "servermode"):
+            if rules.get(key):
+                shown_type = rules[key]
+                break
+        return map_name, names, str(shown_type or game_type or "—")
+    finally:
+        sock.close()
+
+
+# ----------------------------------------------------------------------------
+# Steam A2S (запасной вариант)
+# ----------------------------------------------------------------------------
+
+def fetch_a2s(ip, port):
+    import a2s  # импорт здесь: библиотека нужна только как запасной вариант
+
+    addr = (ip, port)
+    info = a2s.info(addr, timeout=4)
+    players = a2s.players(addr, timeout=4)
     game_type = None
     try:
-        rules = a2s.rules(addr, timeout=5)
+        rules = a2s.rules(addr, timeout=4)
         for key in ("GameType", "gametype", "game_type", "GameMode", "mutator_gametype"):
             if key in rules:
                 game_type = rules[key]
@@ -36,6 +170,27 @@ def fetch():
     names = [p.name.strip() for p in players if p.name and p.name.strip()]
     return info.map_name, names, str(game_type or info.game or "—")
 
+
+def fetch():
+    ip = socket.gethostbyname(HOST)
+    print(f"Опрашиваю {HOST} ({ip}), порты: {PORTS}")
+    errors = []
+    for port in PORTS:
+        for label, func in (("Unreal", fetch_unreal), ("A2S", fetch_a2s)):
+            try:
+                result = func(ip, port)
+                print(f"Ответил порт {port} по протоколу {label}")
+                return result
+            except Exception as e:
+                msg = f"порт {port} / {label}: {type(e).__name__}: {e}"
+                print(msg)
+                errors.append(msg)
+    raise RuntimeError("ни один порт не ответил")
+
+
+# ----------------------------------------------------------------------------
+# Состояние и отправка в Discord
+# ----------------------------------------------------------------------------
 
 def load_state():
     try:
